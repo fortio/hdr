@@ -123,7 +123,7 @@ func GenerateDemoImage() int {
 	// --- Configuration ---
 	width := 1024
 	height := 1024
-	maxIterations := 16384
+	maxIterations := 2048
 	scale := 0.0025 // Controls the zoom level (lower is zoomed in)
 
 	// Center of the Mandelbrot set (approximate)
