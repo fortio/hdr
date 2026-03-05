@@ -31,12 +31,12 @@ CGO_ENABLED=0 go run fortio.org/hdr/hdr_demo@latest  # to run without install
 
 or
 ```
-brew install fortio/tap/hdr
+brew install fortio/tap/hdr_demo
 ```
 
 or
 ```
-docker run -ti -v `pwd`:/home/user fortio/hdr
+docker run -ti -v `pwd`:/home/user fortio/hdr_demo
 ```
 
 
