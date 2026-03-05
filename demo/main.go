@@ -201,7 +201,7 @@ func GenerateDemoImage() int {
 	}
 	defer file.Close()
 	// err = png.Encode(file, img)
-	err = hdr.Encode(file, img, 0.5) // anything above 0.5 will be hdr bright.
+	err = hdr.Encode(file, img, 0.4) // white=0.4 means input pixels above 40% brightness will appear brighter than SDR white on HDR displays
 	if err != nil {
 		return log.FErrf("can't encode png: %v", err)
 	}
