@@ -1,18 +1,19 @@
-// hdr
-// Support for high dynamic range synthetic PNG image in go
-
+// Package main demoes the support for high dynamic range synthetic PNG image in go
+// using a nice mandelbrot set with exponential cyclic coloring in CIE LCH color space
+// with derivative-based shading.
+// See https://en.wikipedia.org/wiki/Plotting_algorithms_for_the_Mandelbrot_set
 package main
 
 import (
 	"flag"
 	"image"
 	"image/color"
-	"image/png"
 	"math"
 	"os"
 	"runtime/pprof"
 
 	"fortio.org/cli"
+	"fortio.org/hdr"
 	"fortio.org/log"
 	"fortio.org/progressbar"
 )
@@ -20,6 +21,8 @@ import (
 func main() {
 	os.Exit(Main())
 }
+
+const maxAlpha = 65535
 
 func Main() int {
 	fCpuprofile := flag.String("profile-cpu", "", "write cpu profile to `file`")
@@ -63,7 +66,7 @@ func srgbGamma(c float64) float64 {
 
 // lchToRGBA64 converts CIE LCH(ab) color to sRGB RGBA64.
 // L: lightness [0,100], C: chroma [0,~130], H: hue angle in degrees [0,360).
-func lchToRGBA64(l, c, h float64) color.RGBA64 {
+func lchToRGBA64(l, c, h float64) color.NRGBA64 {
 	// LCH to Lab
 	Hrad := h * math.Pi / 180
 	a := c * math.Cos(Hrad)
@@ -111,9 +114,9 @@ func lchToRGBA64(l, c, h float64) color.RGBA64 {
 		} else if v > 1 {
 			v = 1
 		}
-		return uint16(v * 65535)
+		return uint16(v * maxAlpha)
 	}
-	return color.RGBA64{clamp16(rLin), clamp16(gLin), clamp16(bLin), 65535}
+	return color.NRGBA64{clamp16(rLin), clamp16(gLin), clamp16(bLin), maxAlpha}
 }
 
 // GenerateDemoImage generates a Mandelbrot set using exponential cyclic
@@ -138,8 +141,8 @@ func GenerateDemoImage() int {
 	vx := math.Cos(lightAngle)
 	vy := math.Sin(lightAngle)
 
-	// Create an empty RGBA image
-	img := image.NewRGBA64(image.Rect(0, 0, width, height))
+	// Create an empty image
+	img := image.NewNRGBA64(image.Rect(0, 0, width, height))
 
 	// --- Generate Mandelbrot ---
 	bar := progressbar.NewBar()
@@ -186,22 +189,24 @@ func GenerateDemoImage() int {
 			}
 			l := 20 + 70*shade // lightness: dark (20) → bright (90)
 			chr := 80.0        // chroma (saturation)
-			img.SetRGBA64(x, y, lchToRGBA64(l, chr, h))
+			img.SetNRGBA64(x, y, lchToRGBA64(l, chr, h))
 		}
 		bar.Progress(100. * float64(y) / float64(height))
 	}
 	// Save to png
-	file, err := os.Create("mandelbrot.png")
+	fname := "mandelbrot_hdr.png"
+	file, err := os.Create(fname)
 	if err != nil {
 		return log.FErrf("can't create output file: %v", err)
 	}
 	defer file.Close()
-	err = png.Encode(file, img)
+	// err = png.Encode(file, img)
+	err = hdr.Encode(file, img, 0.5) // anything above 0.5 will be hdr bright.
 	if err != nil {
 		return log.FErrf("can't encode png: %v", err)
 	}
 	bar.Progress(100)
 	bar.End()
-	log.Infof("Mandelbrot set successfully saved to mandelbrot.png")
+	log.Infof("Mandelbrot set successfully saved to %s", fname)
 	return 0
 }
