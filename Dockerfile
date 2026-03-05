@@ -1,4 +1,4 @@
 FROM scratch
-COPY hdr /usr/bin/hdr
+COPY demo /usr/bin/demo
 ENV HOME=/home/user
-ENTRYPOINT ["/usr/bin/hdr"]
+ENTRYPOINT ["/usr/bin/demo"]
