@@ -1,4 +1,4 @@
-module fortio.org/NAME
+module fortio.org/hdr
 
 go 1.24.0
 

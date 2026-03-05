@@ -1,5 +1,5 @@
-// NAME
-// DESCRIPTION
+// hdr
+// Support for high dynamic range synthetic PNG image in go
 
 package main
 
@@ -55,7 +55,7 @@ func Main() int {
 		ap.ClearScreen()
 		ap.StartSyncMode()
 		// Redraw/resize/do something here:
-		ap.WriteBoxed(ap.H/2-1, "Welcome to NAME!\n%dx%d\nQ to quit.", ap.W, ap.H)
+		ap.WriteBoxed(ap.H/2-1, "Welcome to hdr!\n%dx%d\nQ to quit.", ap.W, ap.H)
 		// ...
 		ap.EndSyncMode()
 		return nil
