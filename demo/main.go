@@ -1,4 +1,4 @@
-// Package main demoes the support for high dynamic range synthetic PNG image in go
+// Package main demonstrates the support for high dynamic range synthetic PNG image in Go
 // using a nice mandelbrot set with exponential cyclic coloring in CIE LCH color space
 // with derivative-based shading.
 // See https://en.wikipedia.org/wiki/Plotting_algorithms_for_the_Mandelbrot_set
