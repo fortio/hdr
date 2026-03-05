@@ -79,8 +79,8 @@ func TestEncodeHDR(t *testing.T) {
 	if len(cicp) != 4 {
 		t.Fatalf("cICP chunk length = %d, want 4", len(cicp))
 	}
-	if cicp[0] != 9 || cicp[1] != 16 || cicp[2] != 0 || cicp[3] != 1 {
-		t.Errorf("cICP = %v, want [9 16 0 1] (BT.2020, PQ, Identity, FullRange)", cicp)
+	if cicp[0] != 1 || cicp[1] != 16 || cicp[2] != 0 || cicp[3] != 1 {
+		t.Errorf("cICP = %v, want [1 16 0 1] (BT.709, PQ, Identity, FullRange)", cicp)
 	}
 	// Verify cICP appears before IDAT.
 	_, hasCICP := findChunk(raw, "cICP")

@@ -211,7 +211,7 @@ func Encode(w io.Writer, img *image.NRGBA64, white float64) error {
 	var scaleFactor float64
 	if hdrMode {
 		cicp := [4]byte{
-			9,  // Color primaries: BT.2020
+			1,  // Color primaries: BT.709/sRGB (pixel data is not gamut-converted)
 			16, // Transfer function: PQ (SMPTE ST 2084)
 			0,  // Matrix coefficients: Identity
 			1,  // Video full range flag
