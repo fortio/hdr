@@ -6,9 +6,17 @@
 
 # hdr
 
-Support for high dynamic range synthetic PNG image in go (library part not here yet)
+Support for high dynamic range synthetic PNG image in go
 
-![Mandelbrot](mandelbrot.png)
+Demonstration in demo/ producing:
+
+SDR:
+
+![Mandelbrot SDR](mandelbrot.png)
+
+HDR:
+
+![Mandelbrot HDR](mandelbrot_hdr.png)
 
 ## Install
 You can get the binary from [releases](https://github.com/fortio/hdr/releases)
