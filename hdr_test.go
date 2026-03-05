@@ -20,22 +20,18 @@ func TestEncodeRoundTrip(t *testing.T) {
 	for x := range w {
 		img.SetNRGBA64(x, 1, color.NRGBA64{R: 65535, G: 65535, B: 65535, A: 65535})
 	}
-
 	var buf bytes.Buffer
 	if err := Encode(&buf, img, 0); err != nil {
 		t.Fatalf("Encode failed: %v", err)
 	}
-
 	decoded, err := png.Decode(&buf)
 	if err != nil {
 		t.Fatalf("png.Decode failed: %v", err)
 	}
-
 	bounds := decoded.Bounds()
 	if bounds.Dx() != w || bounds.Dy() != h {
 		t.Fatalf("decoded size %dx%d, want %dx%d", bounds.Dx(), bounds.Dy(), w, h)
 	}
-
 	for y := range h {
 		for x := range w {
 			want := img.NRGBA64At(x, y)
@@ -70,12 +66,10 @@ func TestEncodeHDR(t *testing.T) {
 	img.SetNRGBA64(1, 0, color.NRGBA64{R: 65535, A: 65535})
 	img.SetNRGBA64(2, 0, color.NRGBA64{G: 32768, A: 65535})
 	img.SetNRGBA64(3, 0, color.NRGBA64{B: 8192, A: 65535})
-
 	var buf bytes.Buffer
 	if err := Encode(&buf, img, 0.5); err != nil {
 		t.Fatalf("Encode HDR failed: %v", err)
 	}
-
 	raw := buf.Bytes()
 	// Verify cICP chunk is present with correct values.
 	cicp, ok := findChunk(raw, "cICP")
@@ -88,7 +82,6 @@ func TestEncodeHDR(t *testing.T) {
 	if cicp[0] != 9 || cicp[1] != 16 || cicp[2] != 0 || cicp[3] != 1 {
 		t.Errorf("cICP = %v, want [9 16 0 1] (BT.2020, PQ, Identity, FullRange)", cicp)
 	}
-
 	// Verify cICP appears before IDAT.
 	_, hasCICP := findChunk(raw, "cICP")
 	idatPos := bytes.Index(raw, []byte("IDAT"))
@@ -96,7 +89,6 @@ func TestEncodeHDR(t *testing.T) {
 	if !hasCICP || cicpPos > idatPos {
 		t.Error("cICP chunk must appear before IDAT")
 	}
-
 	// Verify the output is still a valid PNG (stdlib can parse the structure).
 	if _, err := png.Decode(bytes.NewReader(raw)); err != nil {
 		t.Fatalf("stdlib png.Decode failed on HDR output: %v", err)
@@ -107,7 +99,6 @@ func TestEncodeNoHDR(t *testing.T) {
 	// With white=0, no cICP chunk should be present.
 	img := image.NewNRGBA64(image.Rect(0, 0, 2, 2))
 	img.SetNRGBA64(0, 0, color.NRGBA64{R: 65535, A: 65535})
-
 	var buf bytes.Buffer
 	if err := Encode(&buf, img, 0); err != nil {
 		t.Fatalf("Encode SDR failed: %v", err)
