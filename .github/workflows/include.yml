@@ -23,8 +23,8 @@ jobs:
         uses: fortio/workflows/.github/workflows/releaser.yml@main
         with:
             description: "Support for high dynamic range synthetic PNG image in go"
-            binary_name: "demo"
-            main_path: "./demo"
+            binary_name: "hdr_demo"
+            main_path: "./hdr_demo"
             dockerfile: "./Dockerfile"
         secrets:
             GH_PAT: ${{ secrets.GH_PAT }}
