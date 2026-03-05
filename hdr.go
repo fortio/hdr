@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"compress/zlib"
 	"encoding/binary"
+	"fmt"
 	"hash/crc32"
 	"image"
 	"io"
@@ -180,21 +181,22 @@ func sumAbs(data []byte) int64 {
 	return s
 }
 
-// Encode writes img as a PNG (truecolor 16-bit per channel with alpha) to w.
-// Adaptive row filtering (None/Sub/Up/Average/Paeth) is used to minimize file size.
-//
+// Encode writes img as an HDR PNG 3.0 (truecolor 16-bit per channel with alpha) to the provided writer.
 // The white parameter controls HDR output (PNG 3.0 with cICP chunk):
 //   - white == 0 : standard sRGB PNG (no HDR metadata).
 //   - white in (0,1] : HDR PQ PNG.  Input pixels at this sRGB intensity
 //     map to SDR reference white (203 nits); brighter pixels extend into
 //     the HDR range.  For example white=0.5 means anything above 50 %
 //     input brightness will appear brighter than SDR white on HDR displays.
-func Encode(w io.Writer, img *image.NRGBA64, white float64) error {
+func Encode(writer io.Writer, img *image.NRGBA64, white float64) error {
 	bounds := img.Bounds()
 	width := bounds.Dx()
 	height := bounds.Dy()
+	if white < 0 || white > 1 {
+		return fmt.Errorf("white parameter must be in [0,1], got %f", white)
+	}
 	// PNG signature
-	if _, err := w.Write(pngSignature[:]); err != nil {
+	if _, err := writer.Write(pngSignature[:]); err != nil {
 		return err
 	}
 	// IHDR
@@ -203,7 +205,7 @@ func Encode(w io.Writer, img *image.NRGBA64, white float64) error {
 	binary.BigEndian.PutUint32(ihdr[4:8], safecast.MustConv[uint32](height))
 	ihdr[8] = 16 // bit depth: 16 bits per channel
 	ihdr[9] = 6  // color type: truecolor with alpha (RGBA)
-	if err := writeChunk(w, "IHDR", ihdr[:]); err != nil {
+	if err := writeChunk(writer, "IHDR", ihdr[:]); err != nil {
 		return err
 	}
 	// HDR mode: add cICP chunk (PNG 3.0) signaling BT.2020 + PQ.
@@ -216,7 +218,7 @@ func Encode(w io.Writer, img *image.NRGBA64, white float64) error {
 			0,  // Matrix coefficients: Identity
 			1,  // Video full range flag
 		}
-		if err := writeChunk(w, "cICP", cicp[:]); err != nil {
+		if err := writeChunk(writer, "cICP", cicp[:]); err != nil {
 			return err
 		}
 		// scaleFactor maps srgbToLinear(white) → SDR reference white in PQ's
@@ -272,9 +274,9 @@ func Encode(w io.Writer, img *image.NRGBA64, white float64) error {
 	if err := zw.Close(); err != nil {
 		return err
 	}
-	if err := writeChunk(w, "IDAT", buf.Bytes()); err != nil {
+	if err := writeChunk(writer, "IDAT", buf.Bytes()); err != nil {
 		return err
 	}
 	// IEND
-	return writeChunk(w, "IEND", nil)
+	return writeChunk(writer, "IEND", nil)
 }

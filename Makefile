@@ -16,6 +16,6 @@ coverage:
 	go test -race -coverprofile=coverage.out -covermode=atomic ./...
 
 demo:
-	go run ./demo
+	go run ./hdr_demo
 
 .PHONY: lint coverage test demo all
