@@ -28,6 +28,11 @@ const maxAlpha = 65535
 func Main() int {
 	fCpuprofile := flag.String("profile-cpu", "", "write cpu profile to `file`")
 	fMemprofile := flag.String("profile-mem", "", "write memory profile to `file`")
+	fHueFreq := flag.Float64("hue-freq", 0.35, "hue frequency multiplier for coloring (higher means more color cycles)")
+	fChroma := flag.Float64("chroma", 80, "chroma (saturation) for coloring")
+	fShading := flag.Float64("shading", 70, "range for shading lightness (0 = no shading, 100 = full range from black to white)")
+	fLightAngle := flag.Float64("light-angle", 45, "light angle in degrees for shading (azimuth)")
+	fLightHeight := flag.Float64("light-height", 1.5, "light height for shading (elevation, higher means more light from above)")
 	cli.Main()
 	if *fCpuprofile != "" {
 		f, err := os.Create(*fCpuprofile)
@@ -41,7 +46,7 @@ func Main() int {
 		log.Infof("Writing cpu profile to %s", *fCpuprofile)
 		defer pprof.StopCPUProfile()
 	}
-	res := GenerateDemoImage()
+	res := GenerateDemoImage(*fHueFreq, *fChroma, *fShading, *fLightAngle, *fLightHeight)
 	if *fMemprofile != "" {
 		f, errMP := os.Create(*fMemprofile)
 		if errMP != nil {
@@ -123,31 +128,24 @@ func lchToRGBA64(l, c, h float64) color.NRGBA64 {
 // GenerateDemoImage generates a Mandelbrot set using exponential cyclic
 // coloring in CIE LCH color space with derivative-based shading.
 // See https://en.wikipedia.org/wiki/Plotting_algorithms_for_the_Mandelbrot_set
-func GenerateDemoImage() int {
+func GenerateDemoImage(hueFreq, chr, shading, lightAngle, lightHeight float64) int {
 	// --- Configuration ---
 	width := 1024
 	height := 1024
 	maxIterations := 2048
 	scale := 0.0025 // Controls the zoom level (lower is zoomed in)
-
 	// Center of the Mandelbrot set (approximate)
 	centerX := -0.5
 	centerY := 0.0
-
-	bailoutSq := 1e12 // bailout radius² (radius = 1e6, needed for smooth coloring)
-
+	// bailout radius² (radius = 1e6, needed for smooth coloring)
+	bailoutSq := 1e12
 	// Shading: light direction for normal-mapped shading via dz/dc
-	lightAngle := 45.0 * math.Pi / 180 // azimuth
-	lightHeight := 1.5                 // elevation
+	lightAngle *= math.Pi / 180 // azimuth
 	vx := math.Cos(lightAngle)
 	vy := math.Sin(lightAngle)
 
-	// Create an empty image
 	img := image.NewNRGBA64(image.Rect(0, 0, width, height))
-
-	// --- Generate Mandelbrot ---
 	bar := progressbar.NewBar()
-
 	for y := range height {
 		cIm := (float64(y)-float64(height)/2)*scale + centerY
 		for x := range width {
@@ -175,7 +173,7 @@ func GenerateDemoImage() int {
 			}
 			// Exponential cyclic hue: log₂ compresses iteration bands
 			// so color cycles are evenly spaced on a log scale
-			h := math.Mod(360*0.4*math.Log2(mu+1), 360)
+			h := math.Mod(360*hueFreq*math.Log2(mu+1), 360)
 			// Shading from orbit derivative (normal mapping)
 			shade := 1.0
 			if dzAbs := math.Hypot(real(dz), imag(dz)); dzAbs > 0 {
@@ -188,8 +186,7 @@ func GenerateDemoImage() int {
 					}
 				}
 			}
-			l := 20 + 70*shade // lightness: dark (20) → bright (90)
-			chr := 80.0        // chroma (saturation)
+			l := 20 + shading*shade // lightness: dark → bright based on shading range
 			img.SetNRGBA64(x, y, lchToRGBA64(l, chr, h))
 		}
 		bar.Progress(100. * float64(y) / float64(height))
