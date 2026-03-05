@@ -6,14 +6,16 @@
 
 # hdr
 
-Support for high dynamic range synthetic PNG image in go
+Support for high dynamic range synthetic PNG image in go (library part not here yet)
+
+![Mandelbrot](mandelbrot.png)
 
 ## Install
 You can get the binary from [releases](https://github.com/fortio/hdr/releases)
 
 Or just run
 ```
-CGO_ENABLED=0 go install fortio.org/hdr@latest  # to install (in ~/go/bin typically) or just
+CGO_ENABLED=0 go install fortio.org/hdr/demo@latest  # to install (in ~/go/bin typically) or just
 CGO_ENABLED=0 go run fortio.org/hdr@latest  # to run without install
 ```
 
