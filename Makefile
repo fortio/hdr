@@ -1,6 +1,8 @@
 # Makefile for local tests, lint
 # (release is goreleaser from shared workflows)
 
+all: test lint demo
+
 test:
 	go test -race ./...
 
@@ -13,4 +15,7 @@ lint: .golangci.yml
 coverage:
 	go test -race -coverprofile=coverage.out -covermode=atomic ./...
 
-.PHONY: lint coverage test
+demo:
+	go run ./demo
+
+.PHONY: lint coverage test demo all

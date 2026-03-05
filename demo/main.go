@@ -8,6 +8,7 @@ import (
 	"flag"
 	"image"
 	"image/color"
+	"image/png"
 	"math"
 	"os"
 	"runtime/pprof"
@@ -193,20 +194,33 @@ func GenerateDemoImage() int {
 		}
 		bar.Progress(100. * float64(y) / float64(height))
 	}
-	// Save to png
-	fname := "mandelbrot_hdr.png"
+	bar.Progress(100)
+	bar.End()
+	// Save to normal png
+	fname := "mandelbrot.png"
 	file, err := os.Create(fname)
 	if err != nil {
 		return log.FErrf("can't create output file: %v", err)
 	}
-	defer file.Close()
-	// err = png.Encode(file, img)
-	err = hdr.Encode(file, img, 0.4) // white=0.4 means input pixels above 40% brightness will appear brighter than SDR white on HDR displays
+	err = png.Encode(file, img)
+	_ = file.Close()
+	if err != nil {
+		return log.FErrf("can't encode regular png: %v", err)
+	}
+	log.Infof("Mandelbrot set successfully saved to normal %s", fname)
+
+	// Save to HDR png
+	fname = "mandelbrot_hdr.png"
+	file, err = os.Create(fname)
+	if err != nil {
+		return log.FErrf("can't create output file: %v", err)
+	}
+	// white=0.4 means input pixels above 40% brightness will appear brighter than SDR white on HDR displays
+	err = hdr.Encode(file, img, 0.4)
+	_ = file.Close()
 	if err != nil {
 		return log.FErrf("can't encode png: %v", err)
 	}
-	bar.Progress(100)
-	bar.End()
-	log.Infof("Mandelbrot set successfully saved to %s", fname)
+	log.Infof("Mandelbrot set successfully saved to HDR %s", fname)
 	return 0
 }

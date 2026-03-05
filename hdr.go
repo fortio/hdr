@@ -1,6 +1,8 @@
 // Package hdr provides support for high dynamic range synthetic PNG image in go.
 package hdr
 
+/* Disclaimer: a lot of this code was implemented by AI under my guidance */
+
 import (
 	"bytes"
 	"compress/zlib"
@@ -157,9 +159,9 @@ func remapRowToPQ(dst, src []byte, scaleFactor float64) {
 		if scaled > 1.0 {
 			scaled = 1.0 // clamp to PQ peak (10 000 nits)
 		}
-		out := uint16(pqOETF(scaled)*65535.0 + 0.5)
+		out := uint16(math.Round(pqOETF(scaled) * 65535.))
 		dst[i] = byte(out >> 8)
-		dst[i+1] = byte(out)
+		dst[i+1] = byte(out & 0xff)
 	}
 }
 
@@ -191,12 +193,10 @@ func Encode(w io.Writer, img *image.NRGBA64, white float64) error {
 	bounds := img.Bounds()
 	width := bounds.Dx()
 	height := bounds.Dy()
-
 	// PNG signature
 	if _, err := w.Write(pngSignature[:]); err != nil {
 		return err
 	}
-
 	// IHDR
 	var ihdr [13]byte
 	binary.BigEndian.PutUint32(ihdr[0:4], safecast.MustConv[uint32](width))
@@ -206,13 +206,12 @@ func Encode(w io.Writer, img *image.NRGBA64, white float64) error {
 	if err := writeChunk(w, "IHDR", ihdr[:]); err != nil {
 		return err
 	}
-
-	// HDR mode: add cICP chunk (PNG 3.0) signalling BT.2020 + PQ.
+	// HDR mode: add cICP chunk (PNG 3.0) signaling BT.2020 + PQ.
 	hdrMode := white > 0
 	var scaleFactor float64
 	if hdrMode {
 		cicp := [4]byte{
-			9,  // Colour primaries: BT.2020
+			9,  // Color primaries: BT.2020
 			16, // Transfer function: PQ (SMPTE ST 2084)
 			0,  // Matrix coefficients: Identity
 			1,  // Video full range flag
@@ -224,7 +223,6 @@ func Encode(w io.Writer, img *image.NRGBA64, white float64) error {
 		// normalised luminance range [0,1] (where 1 = 10 000 nits).
 		scaleFactor = (sdrWhiteNits / pqMaxNits) / srgbToLinear(white)
 	}
-
 	// IDAT: adaptively filtered image data wrapped in a zlib stream.
 	// image.NRGBA64.Pix is laid out as [R_hi R_lo G_hi G_lo B_hi B_lo A_hi A_lo ...] per pixel,
 	// which matches the PNG byte order.
@@ -277,7 +275,6 @@ func Encode(w io.Writer, img *image.NRGBA64, white float64) error {
 	if err := writeChunk(w, "IDAT", buf.Bytes()); err != nil {
 		return err
 	}
-
 	// IEND
 	return writeChunk(w, "IEND", nil)
 }
