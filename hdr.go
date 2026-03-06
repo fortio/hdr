@@ -120,6 +120,55 @@ func filterRow(dst, raw, prior []byte, fType byte) {
 	}
 }
 
+func filterRowAndSum(dst, raw, prior []byte, fType byte) int64 {
+	var sum int64
+	switch fType {
+	case filterNone:
+		copy(dst, raw)
+		for _, value := range raw {
+			sum += int64(signedByteAbs[value])
+		}
+	case filterSub:
+		copy(dst[:bpp], raw[:bpp])
+		for _, value := range dst[:bpp] {
+			sum += int64(signedByteAbs[value])
+		}
+		for i := bpp; i < len(raw); i++ {
+			value := raw[i] - raw[i-bpp]
+			dst[i] = value
+			sum += int64(signedByteAbs[value])
+		}
+	case filterUp:
+		for i, current := range raw {
+			value := current - prior[i]
+			dst[i] = value
+			sum += int64(signedByteAbs[value])
+		}
+	case filterAverage:
+		for i, current := range raw {
+			var left byte
+			if i >= bpp {
+				left = raw[i-bpp]
+			}
+			value := current - byte((int(left)+int(prior[i]))>>1)
+			dst[i] = value
+			sum += int64(signedByteAbs[value])
+		}
+	case filterPaeth:
+		for i, current := range raw {
+			var left, upperLeft byte
+			if i >= bpp {
+				left = raw[i-bpp]
+				upperLeft = prior[i-bpp]
+			}
+			value := current - paethPredictor(left, prior[i], upperLeft)
+			dst[i] = value
+			sum += int64(signedByteAbs[value])
+		}
+	}
+	return sum
+}
+
 // PQ (Perceptual Quantizer, SMPTE ST 2084) constants.
 const (
 	pqM1         = 2610.0 / 16384.0 // 0.1593017578125
@@ -151,6 +200,18 @@ func srgbToLinear(v float64) float64 {
 }
 
 var pqLookupTables sync.Map
+var signedByteAbs = func() [256]uint8 {
+	var table [256]uint8
+	for i := range len(table) {
+		v := int8(i)
+		if v < 0 {
+			table[i] = uint8(-v)
+		} else {
+			table[i] = uint8(v)
+		}
+	}
+	return table
+}()
 
 func remapSampleToPQ(v uint16, scaleFactor float64) uint16 {
 	lin := srgbToLinear(float64(v) / maxUint16)
@@ -275,8 +336,7 @@ func Encode(writer io.Writer, img *image.NRGBA64, white float64) error {
 		bestFilter := byte(0)
 		bestSum := int64(1<<63 - 1)
 		for f := range byte(nFilter) {
-			filterRow(candidates[f], raw, priorRow, f)
-			if s := sumAbs(candidates[f]); s < bestSum {
+			if s := filterRowAndSum(candidates[f], raw, priorRow, f); s < bestSum {
 				bestSum = s
 				bestFilter = f
 			}

@@ -77,6 +77,28 @@ func TestRemapRowToPQLookupMatchesReference(t *testing.T) {
 	}
 }
 
+func TestFilterRowAndSumMatchesSeparatePass(t *testing.T) {
+	raw := make([]byte, bpp*17)
+	prior := make([]byte, len(raw))
+	for i := range raw {
+		raw[i] = byte((i*29 + 17) & 0xff)
+		prior[i] = byte((i*47 + 3) & 0xff)
+	}
+	for _, filter := range []byte{filterNone, filterSub, filterUp, filterAverage, filterPaeth} {
+		got := make([]byte, len(raw))
+		want := make([]byte, len(raw))
+		gotSum := filterRowAndSum(got, raw, prior, filter)
+		filterRow(want, raw, prior, filter)
+		wantSum := sumAbs(want)
+		if !bytes.Equal(got, want) {
+			t.Fatalf("filtered row mismatch for filter %d", filter)
+		}
+		if gotSum != wantSum {
+			t.Fatalf("sum mismatch for filter %d: got %d want %d", filter, gotSum, wantSum)
+		}
+	}
+}
+
 func TestEncodeRoundTripNonZeroBounds(t *testing.T) {
 	bounds := image.Rect(10, 20, 14, 23)
 	img := image.NewNRGBA64(bounds)
