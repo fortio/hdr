@@ -12,8 +12,14 @@ import (
 	"image"
 	"io"
 	"math"
+	"sync"
 
 	"fortio.org/safecast"
+)
+
+const (
+	maxUint16 = 65535
+	numUint16 = maxUint16 + 1
 )
 
 // pngSignature is the 8-byte magic number at the start of every PNG file.
@@ -98,7 +104,7 @@ func filterRow(dst, raw, prior []byte, fType byte) {
 		for i := range raw {
 			var left byte
 			if i >= bpp {
-				left = raw[i-bpp]
+				left = raw[i-bpp] //nolint:gosec // gosec not seeing the if guard here for some reason
 			}
 			dst[i] = raw[i] - safecast.MustConv[uint8]((int(left)+int(prior[i]))/2)
 		}
@@ -106,12 +112,61 @@ func filterRow(dst, raw, prior []byte, fType byte) {
 		for i := range raw {
 			var left, upperLeft byte
 			if i >= bpp {
-				left = raw[i-bpp]
+				left = raw[i-bpp] //nolint:gosec // gosec not seeing the if guard here for some reason
 				upperLeft = prior[i-bpp]
 			}
 			dst[i] = raw[i] - paethPredictor(left, prior[i], upperLeft)
 		}
 	}
+}
+
+func filterRowAndSum(dst, raw, prior []byte, fType byte) int64 {
+	var sum int64
+	switch fType {
+	case filterNone:
+		copy(dst, raw)
+		for _, value := range raw {
+			sum += int64(signedByteAbs[value])
+		}
+	case filterSub:
+		copy(dst[:bpp], raw[:bpp])
+		for _, value := range dst[:bpp] {
+			sum += int64(signedByteAbs[value])
+		}
+		for i := bpp; i < len(raw); i++ {
+			value := raw[i] - raw[i-bpp]
+			dst[i] = value
+			sum += int64(signedByteAbs[value])
+		}
+	case filterUp:
+		for i, current := range raw {
+			value := current - prior[i]
+			dst[i] = value
+			sum += int64(signedByteAbs[value])
+		}
+	case filterAverage:
+		for i, current := range raw {
+			var left byte
+			if i >= bpp {
+				left = raw[i-bpp] //nolint:gosec // gosec not seeing the if guard here for some reason
+			}
+			value := current - byte((int(left)+int(prior[i]))>>1) //nolint:gosec // divide by 2 with right shift
+			dst[i] = value
+			sum += int64(signedByteAbs[value])
+		}
+	case filterPaeth:
+		for i, current := range raw {
+			var left, upperLeft byte
+			if i >= bpp {
+				left = raw[i-bpp] //nolint:gosec // gosec not seeing the if guard here for some reason
+				upperLeft = prior[i-bpp]
+			}
+			value := current - paethPredictor(left, prior[i], upperLeft)
+			dst[i] = value
+			sum += int64(signedByteAbs[value])
+		}
+	}
+	return sum
 }
 
 // PQ (Perceptual Quantizer, SMPTE ST 2084) constants.
@@ -144,9 +199,47 @@ func srgbToLinear(v float64) float64 {
 	return math.Pow((v+0.055)/1.055, 2.4)
 }
 
+var (
+	pqLookupTables sync.Map
+	signedByteAbs  = func() [256]uint8 {
+		var table [256]uint8
+		for i := range table {
+			v := int8(i)
+			if v < 0 {
+				table[i] = uint8(-v)
+			} else {
+				table[i] = uint8(v)
+			}
+		}
+		return table
+	}()
+)
+
+func remapSampleToPQ(v uint16, scaleFactor float64) uint16 {
+	lin := srgbToLinear(float64(v) / maxUint16)
+	scaled := lin * scaleFactor
+	if scaled > 1.0 {
+		scaled = 1.0 // clamp to PQ peak (10 000 nits)
+	}
+	return uint16(math.Round(pqOETF(scaled) * maxUint16))
+}
+
+func getPQLookupTable(white float64) *[numUint16]uint16 {
+	key := math.Float64bits(white)
+	if cached, ok := pqLookupTables.Load(key); ok {
+		return cached.(*[numUint16]uint16)
+	}
+	scaleFactor := (sdrWhiteNits / pqMaxNits) / srgbToLinear(white)
+	table := new([numUint16]uint16)
+	for i := range numUint16 {
+		table[i] = remapSampleToPQ(uint16(i), scaleFactor)
+	}
+	actual, _ := pqLookupTables.LoadOrStore(key, table)
+	return actual.(*[numUint16]uint16)
+}
+
 // remapRowToPQ converts a row of 16-bit RGBA pixels from sRGB to PQ encoding.
-// scaleFactor = (sdrWhiteNits / pqMaxNits) / srgbToLinear(white).
-func remapRowToPQ(dst, src []byte, scaleFactor float64) {
+func remapRowToPQ(dst, src []byte, table *[numUint16]uint16) {
 	for i := 0; i < len(src); i += 2 {
 		// Alpha channel (every 4th uint16): pass through unchanged.
 		if (i/2)%4 == 3 {
@@ -155,12 +248,7 @@ func remapRowToPQ(dst, src []byte, scaleFactor float64) {
 			continue
 		}
 		v := uint16(src[i])<<8 | uint16(src[i+1])
-		lin := srgbToLinear(float64(v) / 65535.0)
-		scaled := lin * scaleFactor
-		if scaled > 1.0 {
-			scaled = 1.0 // clamp to PQ peak (10 000 nits)
-		}
-		out := uint16(math.Round(pqOETF(scaled) * 65535.))
+		out := table[v]
 		dst[i] = byte(out >> 8)
 		dst[i+1] = byte(out & 0xff)
 	}
@@ -181,19 +269,24 @@ func sumAbs(data []byte) int64 {
 	return s
 }
 
-// Encode writes img as an HDR PNG 3.0 (truecolor 16-bit per channel with alpha) to the provided writer.
-// The white parameter controls HDR output (PNG 3.0 with cICP chunk):
-//   - white == 0 : standard sRGB PNG (no HDR metadata).
-//   - white in (0,1] : HDR PQ PNG.  Input pixels at this sRGB intensity
-//     map to SDR reference white (203 nits); brighter pixels extend into
-//     the HDR range.  For example white=0.5 means anything above 50 %
-//     input brightness will appear brighter than SDR white on HDR displays.
+// Encode writes img as an HDR PNG 3.0 (truecolor 16-bit per channel with alpha)
+// to the provided writer.
+//
+// The white parameter must be in (0,1]. It is the input sRGB level that maps to
+// SDR reference white (203 nits). Input values above white extend into the HDR
+// range; smaller white values therefore push more of the source range above SDR
+// white. For example white=0.5 means anything above 50 % input brightness will
+// appear brighter than SDR white on HDR displays.
+//
+// white=0 is invalid for HDR output because it would require infinite scaling.
+//
+// For SDR output, use the standard library's image/png encoder directly.
 func Encode(writer io.Writer, img *image.NRGBA64, white float64) error {
 	bounds := img.Bounds()
 	width := bounds.Dx()
 	height := bounds.Dy()
-	if white < 0 || white > 1 {
-		return fmt.Errorf("white parameter must be in [0,1], got %f", white)
+	if white <= 0 || white > 1 {
+		return fmt.Errorf("white parameter must be in (0,1], got %f", white)
 	}
 	// PNG signature
 	if _, err := writer.Write(pngSignature[:]); err != nil {
@@ -208,22 +301,15 @@ func Encode(writer io.Writer, img *image.NRGBA64, white float64) error {
 	if err := writeChunk(writer, "IHDR", ihdr[:]); err != nil {
 		return err
 	}
-	// HDR mode: add cICP chunk (PNG 3.0) signaling BT.2020 + PQ.
-	hdrMode := white > 0
-	var scaleFactor float64
-	if hdrMode {
-		cicp := [4]byte{
-			1,  // Color primaries: BT.709/sRGB (pixel data is not gamut-converted)
-			16, // Transfer function: PQ (SMPTE ST 2084)
-			0,  // Matrix coefficients: Identity
-			1,  // Video full range flag
-		}
-		if err := writeChunk(writer, "cICP", cicp[:]); err != nil {
-			return err
-		}
-		// scaleFactor maps srgbToLinear(white) → SDR reference white in PQ's
-		// normalised luminance range [0,1] (where 1 = 10 000 nits).
-		scaleFactor = (sdrWhiteNits / pqMaxNits) / srgbToLinear(white)
+	// Add cICP (PNG 3.0) signaling sRGB primaries with PQ transfer.
+	cicp := [4]byte{
+		1,  // Color primaries: BT.709/sRGB (pixel data is not gamut-converted)
+		16, // Transfer function: PQ (SMPTE ST 2084)
+		0,  // Matrix coefficients: Identity
+		1,  // Video full range flag
+	}
+	if err := writeChunk(writer, "cICP", cicp[:]); err != nil {
+		return err
 	}
 	// IDAT: adaptively filtered image data wrapped in a zlib stream.
 	// image.NRGBA64.Pix is laid out as [R_hi R_lo G_hi G_lo B_hi B_lo A_hi A_lo ...] per pixel,
@@ -240,24 +326,19 @@ func Encode(writer io.Writer, img *image.NRGBA64, white float64) error {
 		candidates[i] = make([]byte, rowBytes)
 	}
 	priorRow := make([]byte, rowBytes) // zeros for first row (no row above)
-	var remappedRow []byte
-	if hdrMode {
-		remappedRow = make([]byte, rowBytes)
-	}
+	remappedRow := make([]byte, rowBytes)
+	table := getPQLookupTable(white)
 	filterByte := [1]byte{}
 	for y := range height {
 		srcOff := y * img.Stride
 		raw := img.Pix[srcOff : srcOff+rowBytes]
-		if hdrMode {
-			remapRowToPQ(remappedRow, raw, scaleFactor)
-			raw = remappedRow
-		}
+		remapRowToPQ(remappedRow, raw, table)
+		raw = remappedRow
 		// Apply all five filters and pick the one with the smallest absolute sum.
 		bestFilter := byte(0)
 		bestSum := int64(1<<63 - 1)
 		for f := range byte(nFilter) {
-			filterRow(candidates[f], raw, priorRow, f)
-			if s := sumAbs(candidates[f]); s < bestSum {
+			if s := filterRowAndSum(candidates[f], raw, priorRow, f); s < bestSum {
 				bestSum = s
 				bestFilter = f
 			}

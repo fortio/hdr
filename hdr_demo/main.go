@@ -12,6 +12,7 @@ import (
 	"math"
 	"os"
 	"runtime/pprof"
+	"time"
 
 	"fortio.org/cli"
 	"fortio.org/hdr"
@@ -199,7 +200,10 @@ func GenerateDemoImage(hueFreq, chr, shading, lightAngle, lightHeight float64) i
 	if err != nil {
 		return log.FErrf("can't create output file: %v", err)
 	}
+	now := time.Now()
 	err = png.Encode(file, img)
+	elapsed := time.Since(now)
+	log.Infof("Encoding regular PNG took %v", elapsed)
 	_ = file.Close()
 	if err != nil {
 		return log.FErrf("can't encode regular png: %v", err)
@@ -213,7 +217,10 @@ func GenerateDemoImage(hueFreq, chr, shading, lightAngle, lightHeight float64) i
 		return log.FErrf("can't create output file: %v", err)
 	}
 	// white=0.4 means input pixels above 40% brightness will appear brighter than SDR white on HDR displays
+	now = time.Now()
 	err = hdr.Encode(file, img, 0.4)
+	elapsed = time.Since(now)
+	log.Infof("Encoding HDR PNG took %v", elapsed)
 	_ = file.Close()
 	if err != nil {
 		return log.FErrf("can't encode png: %v", err)
