@@ -10,17 +10,33 @@ import (
 	"testing"
 )
 
+func remapRowToPQReference(dst, src []byte, white float64) {
+	scaleFactor := (sdrWhiteNits / pqMaxNits) / srgbToLinear(white)
+	for i := 0; i < len(src); i += 2 {
+		if (i/2)%4 == 3 {
+			dst[i] = src[i]
+			dst[i+1] = src[i+1]
+			continue
+		}
+		v := uint16(src[i])<<8 | uint16(src[i+1])
+		out := remapSampleToPQ(v, scaleFactor)
+		dst[i] = byte(out >> 8)
+		dst[i+1] = byte(out)
+	}
+}
+
 func TestEncodeRoundTrip(t *testing.T) {
 	w, h := 4, 3
 	img := image.NewNRGBA64(image.Rect(0, 0, w, h))
-	img.SetNRGBA64(0, 0, color.NRGBA64{R: 65535, A: 65535})
-	img.SetNRGBA64(1, 0, color.NRGBA64{G: 65535, A: 65535})
-	img.SetNRGBA64(2, 0, color.NRGBA64{B: 65535, A: 65535})
-	img.SetNRGBA64(3, 0, color.NRGBA64{R: 32768, G: 16384, B: 8192, A: 65535})
+	img.SetNRGBA64(0, 0, color.NRGBA64{R: maxUint16, A: maxUint16})
+	img.SetNRGBA64(1, 0, color.NRGBA64{G: maxUint16, A: maxUint16})
+	img.SetNRGBA64(2, 0, color.NRGBA64{B: maxUint16, A: maxUint16})
+	img.SetNRGBA64(3, 0, color.NRGBA64{R: 32768, G: 16384, B: 8192, A: maxUint16})
 	for x := range w {
-		img.SetNRGBA64(x, 1, color.NRGBA64{R: 65535, G: 65535, B: 65535, A: 65535})
+		img.SetNRGBA64(x, 1, color.NRGBA64{R: maxUint16, G: maxUint16, B: maxUint16, A: maxUint16})
 	}
 	var buf bytes.Buffer
+	const white = 0.5
 	if err := Encode(&buf, img, 0.5); err != nil {
 		t.Fatalf("Encode failed: %v", err)
 	}
@@ -37,7 +53,7 @@ func TestEncodeRoundTrip(t *testing.T) {
 	for y := range h {
 		srcOff := y * img.Stride
 		dstOff := y * expected.Stride
-		remapRowToPQ(expected.Pix[dstOff:dstOff+w*bpp], img.Pix[srcOff:srcOff+w*bpp], (sdrWhiteNits/pqMaxNits)/srgbToLinear(0.5))
+		remapRowToPQReference(expected.Pix[dstOff:dstOff+w*bpp], img.Pix[srcOff:srcOff+w*bpp], white)
 		for x := range w {
 			want := expected.NRGBA64At(x, y)
 			got := decodedNRGBA64.NRGBA64At(x, y)
@@ -48,15 +64,28 @@ func TestEncodeRoundTrip(t *testing.T) {
 	}
 }
 
+func TestRemapRowToPQLookupMatchesReference(t *testing.T) {
+	for _, white := range []float64{0.4, 0.5, 1.0} {
+		src := benchmarkImage(64, 8)
+		got := make([]byte, len(src.Pix))
+		want := make([]byte, len(src.Pix))
+		remapRowToPQ(got, src.Pix, getPQLookupTable(white))
+		remapRowToPQReference(want, src.Pix, white)
+		if !bytes.Equal(got, want) {
+			t.Fatalf("lookup remap mismatch for white=%g", white)
+		}
+	}
+}
+
 func TestEncodeRoundTripNonZeroBounds(t *testing.T) {
 	bounds := image.Rect(10, 20, 14, 23)
 	img := image.NewNRGBA64(bounds)
-	img.SetNRGBA64(10, 20, color.NRGBA64{R: 65535, A: 65535})
-	img.SetNRGBA64(11, 20, color.NRGBA64{G: 65535, A: 65535})
-	img.SetNRGBA64(12, 20, color.NRGBA64{B: 65535, A: 65535})
-	img.SetNRGBA64(13, 20, color.NRGBA64{R: 32768, G: 16384, B: 8192, A: 65535})
+	img.SetNRGBA64(10, 20, color.NRGBA64{R: maxUint16, A: maxUint16})
+	img.SetNRGBA64(11, 20, color.NRGBA64{G: maxUint16, A: maxUint16})
+	img.SetNRGBA64(12, 20, color.NRGBA64{B: maxUint16, A: maxUint16})
+	img.SetNRGBA64(13, 20, color.NRGBA64{R: 32768, G: 16384, B: 8192, A: maxUint16})
 	for x := bounds.Min.X; x < bounds.Max.X; x++ {
-		img.SetNRGBA64(x, 21, color.NRGBA64{R: 65535, G: 65535, B: 65535, A: 65535})
+		img.SetNRGBA64(x, 21, color.NRGBA64{R: maxUint16, G: maxUint16, B: maxUint16, A: maxUint16})
 	}
 	zeroBounds := image.NewNRGBA64(image.Rect(0, 0, bounds.Dx(), bounds.Dy()))
 	for y := range bounds.Dy() {
@@ -96,10 +125,10 @@ func TestEncodeHDR(t *testing.T) {
 	w, h := 4, 3
 	img := image.NewNRGBA64(image.Rect(0, 0, w, h))
 	// Set some bright pixels that should extend into HDR.
-	img.SetNRGBA64(0, 0, color.NRGBA64{R: 65535, G: 65535, B: 65535, A: 65535})
-	img.SetNRGBA64(1, 0, color.NRGBA64{R: 65535, A: 65535})
-	img.SetNRGBA64(2, 0, color.NRGBA64{G: 32768, A: 65535})
-	img.SetNRGBA64(3, 0, color.NRGBA64{B: 8192, A: 65535})
+	img.SetNRGBA64(0, 0, color.NRGBA64{R: maxUint16, G: maxUint16, B: maxUint16, A: maxUint16})
+	img.SetNRGBA64(1, 0, color.NRGBA64{R: maxUint16, A: maxUint16})
+	img.SetNRGBA64(2, 0, color.NRGBA64{G: 32768, A: maxUint16})
+	img.SetNRGBA64(3, 0, color.NRGBA64{B: 8192, A: maxUint16})
 	var buf bytes.Buffer
 	if err := Encode(&buf, img, 0.5); err != nil {
 		t.Fatalf("Encode HDR failed: %v", err)

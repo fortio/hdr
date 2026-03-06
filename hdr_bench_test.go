@@ -18,10 +18,10 @@ func benchmarkImage(width, height int) *image.NRGBA64 {
 			fx := float64(x) / float64(width-1)
 			wave := 0.5 + 0.5*math.Sin(float64(x)*0.071+float64(y)*0.043)
 			img.SetNRGBA64(x, y, color.NRGBA64{
-				R: uint16(fx * 65535),
-				G: uint16(fy * 65535),
-				B: uint16(wave * 65535),
-				A: 65535,
+				R: uint16(fx * maxUint16),
+				G: uint16(fy * maxUint16),
+				B: uint16(wave * maxUint16),
+				A: maxUint16,
 			})
 		}
 	}
@@ -50,14 +50,14 @@ func benchmarkRemapOnly(b *testing.B, white float64) {
 	img := benchmarkImage(512, 512)
 	rowBytes := img.Rect.Dx() * bpp
 	remappedRow := make([]byte, rowBytes)
-	scaleFactor := (sdrWhiteNits / pqMaxNits) / srgbToLinear(white)
+	table := getPQLookupTable(white)
 	b.SetBytes(int64(len(img.Pix)))
 	b.ReportAllocs()
 	b.ResetTimer()
 	for range b.N {
 		for y := range img.Rect.Dy() {
 			srcOff := y * img.Stride
-			remapRowToPQ(remappedRow, img.Pix[srcOff:srcOff+rowBytes], scaleFactor)
+			remapRowToPQ(remappedRow, img.Pix[srcOff:srcOff+rowBytes], table)
 		}
 	}
 	benchmarkSink = remappedRow[0] ^ remappedRow[len(remappedRow)-1]

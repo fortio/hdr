@@ -12,8 +12,14 @@ import (
 	"image"
 	"io"
 	"math"
+	"sync"
 
 	"fortio.org/safecast"
+)
+
+const (
+	maxUint16 = 65535
+	numUint16 = maxUint16 + 1
 )
 
 // pngSignature is the 8-byte magic number at the start of every PNG file.
@@ -144,9 +150,33 @@ func srgbToLinear(v float64) float64 {
 	return math.Pow((v+0.055)/1.055, 2.4)
 }
 
+var pqLookupTables sync.Map
+
+func remapSampleToPQ(v uint16, scaleFactor float64) uint16 {
+	lin := srgbToLinear(float64(v) / maxUint16)
+	scaled := lin * scaleFactor
+	if scaled > 1.0 {
+		scaled = 1.0 // clamp to PQ peak (10 000 nits)
+	}
+	return uint16(math.Round(pqOETF(scaled) * maxUint16))
+}
+
+func getPQLookupTable(white float64) *[numUint16]uint16 {
+	key := math.Float64bits(white)
+	if cached, ok := pqLookupTables.Load(key); ok {
+		return cached.(*[numUint16]uint16)
+	}
+	scaleFactor := (sdrWhiteNits / pqMaxNits) / srgbToLinear(white)
+	table := new([numUint16]uint16)
+	for i := range numUint16 {
+		table[i] = remapSampleToPQ(uint16(i), scaleFactor)
+	}
+	actual, _ := pqLookupTables.LoadOrStore(key, table)
+	return actual.(*[numUint16]uint16)
+}
+
 // remapRowToPQ converts a row of 16-bit RGBA pixels from sRGB to PQ encoding.
-// scaleFactor = (sdrWhiteNits / pqMaxNits) / srgbToLinear(white).
-func remapRowToPQ(dst, src []byte, scaleFactor float64) {
+func remapRowToPQ(dst, src []byte, table *[numUint16]uint16) {
 	for i := 0; i < len(src); i += 2 {
 		// Alpha channel (every 4th uint16): pass through unchanged.
 		if (i/2)%4 == 3 {
@@ -155,12 +185,7 @@ func remapRowToPQ(dst, src []byte, scaleFactor float64) {
 			continue
 		}
 		v := uint16(src[i])<<8 | uint16(src[i+1])
-		lin := srgbToLinear(float64(v) / 65535.0)
-		scaled := lin * scaleFactor
-		if scaled > 1.0 {
-			scaled = 1.0 // clamp to PQ peak (10 000 nits)
-		}
-		out := uint16(math.Round(pqOETF(scaled) * 65535.))
+		out := table[v]
 		dst[i] = byte(out >> 8)
 		dst[i+1] = byte(out & 0xff)
 	}
@@ -223,9 +248,6 @@ func Encode(writer io.Writer, img *image.NRGBA64, white float64) error {
 	if err := writeChunk(writer, "cICP", cicp[:]); err != nil {
 		return err
 	}
-	// scaleFactor maps srgbToLinear(white) -> SDR reference white in PQ's
-	// normalised luminance range [0,1] (where 1 = 10 000 nits).
-	scaleFactor := (sdrWhiteNits / pqMaxNits) / srgbToLinear(white)
 	// IDAT: adaptively filtered image data wrapped in a zlib stream.
 	// image.NRGBA64.Pix is laid out as [R_hi R_lo G_hi G_lo B_hi B_lo A_hi A_lo ...] per pixel,
 	// which matches the PNG byte order.
@@ -242,11 +264,12 @@ func Encode(writer io.Writer, img *image.NRGBA64, white float64) error {
 	}
 	priorRow := make([]byte, rowBytes) // zeros for first row (no row above)
 	remappedRow := make([]byte, rowBytes)
+	table := getPQLookupTable(white)
 	filterByte := [1]byte{}
 	for y := range height {
 		srcOff := y * img.Stride
 		raw := img.Pix[srcOff : srcOff+rowBytes]
-		remapRowToPQ(remappedRow, raw, scaleFactor)
+		remapRowToPQ(remappedRow, raw, table)
 		raw = remappedRow
 		// Apply all five filters and pick the one with the smallest absolute sum.
 		bestFilter := byte(0)
