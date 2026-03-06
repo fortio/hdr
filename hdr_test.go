@@ -37,7 +37,7 @@ func TestEncodeRoundTrip(t *testing.T) {
 	}
 	var buf bytes.Buffer
 	const white = 0.5
-	if err := Encode(&buf, img, 0.5); err != nil {
+	if err := Encode(&buf, img, white); err != nil {
 		t.Fatalf("Encode failed: %v", err)
 	}
 	decoded, err := png.Decode(&buf)
