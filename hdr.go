@@ -104,7 +104,7 @@ func filterRow(dst, raw, prior []byte, fType byte) {
 		for i := range raw {
 			var left byte
 			if i >= bpp {
-				left = raw[i-bpp]
+				left = raw[i-bpp] //nolint:gosec // gosec not seeing the if guard here for some reason
 			}
 			dst[i] = raw[i] - safecast.MustConv[uint8]((int(left)+int(prior[i]))/2)
 		}
@@ -112,7 +112,7 @@ func filterRow(dst, raw, prior []byte, fType byte) {
 		for i := range raw {
 			var left, upperLeft byte
 			if i >= bpp {
-				left = raw[i-bpp]
+				left = raw[i-bpp] //nolint:gosec // gosec not seeing the if guard here for some reason
 				upperLeft = prior[i-bpp]
 			}
 			dst[i] = raw[i] - paethPredictor(left, prior[i], upperLeft)
@@ -148,9 +148,9 @@ func filterRowAndSum(dst, raw, prior []byte, fType byte) int64 {
 		for i, current := range raw {
 			var left byte
 			if i >= bpp {
-				left = raw[i-bpp]
+				left = raw[i-bpp] //nolint:gosec // gosec not seeing the if guard here for some reason
 			}
-			value := current - byte((int(left)+int(prior[i]))>>1)
+			value := current - byte((int(left)+int(prior[i]))>>1) //nolint:gosec // divide by 2 with right shift
 			dst[i] = value
 			sum += int64(signedByteAbs[value])
 		}
@@ -158,7 +158,7 @@ func filterRowAndSum(dst, raw, prior []byte, fType byte) int64 {
 		for i, current := range raw {
 			var left, upperLeft byte
 			if i >= bpp {
-				left = raw[i-bpp]
+				left = raw[i-bpp] //nolint:gosec // gosec not seeing the if guard here for some reason
 				upperLeft = prior[i-bpp]
 			}
 			value := current - paethPredictor(left, prior[i], upperLeft)
@@ -199,19 +199,21 @@ func srgbToLinear(v float64) float64 {
 	return math.Pow((v+0.055)/1.055, 2.4)
 }
 
-var pqLookupTables sync.Map
-var signedByteAbs = func() [256]uint8 {
-	var table [256]uint8
-	for i := range len(table) {
-		v := int8(i)
-		if v < 0 {
-			table[i] = uint8(-v)
-		} else {
-			table[i] = uint8(v)
+var (
+	pqLookupTables sync.Map
+	signedByteAbs  = func() [256]uint8 {
+		var table [256]uint8
+		for i := range table {
+			v := int8(i)
+			if v < 0 {
+				table[i] = uint8(-v)
+			} else {
+				table[i] = uint8(v)
+			}
 		}
-	}
-	return table
-}()
+		return table
+	}()
+)
 
 func remapSampleToPQ(v uint16, scaleFactor float64) uint16 {
 	lin := srgbToLinear(float64(v) / maxUint16)
