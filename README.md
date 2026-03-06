@@ -19,7 +19,7 @@ HDR:
 ![Mandelbrot HDR](mandelbrot_hdr.png)
 
 ## Install
-Use in your own code importing "fortio.org/hdr" and Encode() away.
+Use in your own code by importing "fortio.org/hdr" to write HDR PNGs. For SDR PNGs, use the standard library's image/png encoder.
 
 You can get the demo binary from [releases](https://github.com/fortio/hdr/releases)
 

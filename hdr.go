@@ -181,19 +181,24 @@ func sumAbs(data []byte) int64 {
 	return s
 }
 
-// Encode writes img as an HDR PNG 3.0 (truecolor 16-bit per channel with alpha) to the provided writer.
-// The white parameter controls HDR output (PNG 3.0 with cICP chunk):
-//   - white == 0 : standard sRGB PNG (no HDR metadata).
-//   - white in (0,1] : HDR PQ PNG.  Input pixels at this sRGB intensity
-//     map to SDR reference white (203 nits); brighter pixels extend into
-//     the HDR range.  For example white=0.5 means anything above 50 %
-//     input brightness will appear brighter than SDR white on HDR displays.
+// Encode writes img as an HDR PNG 3.0 (truecolor 16-bit per channel with alpha)
+// to the provided writer.
+//
+// The white parameter must be in (0,1]. It is the input sRGB level that maps to
+// SDR reference white (203 nits). Input values above white extend into the HDR
+// range; smaller white values therefore push more of the source range above SDR
+// white. For example white=0.5 means anything above 50 % input brightness will
+// appear brighter than SDR white on HDR displays.
+//
+// white=0 is invalid for HDR output because it would require infinite scaling.
+//
+// For SDR output, use the standard library's image/png encoder directly.
 func Encode(writer io.Writer, img *image.NRGBA64, white float64) error {
 	bounds := img.Bounds()
 	width := bounds.Dx()
 	height := bounds.Dy()
-	if white < 0 || white > 1 {
-		return fmt.Errorf("white parameter must be in [0,1], got %f", white)
+	if white <= 0 || white > 1 {
+		return fmt.Errorf("white parameter must be in (0,1], got %f", white)
 	}
 	// PNG signature
 	if _, err := writer.Write(pngSignature[:]); err != nil {
@@ -208,23 +213,19 @@ func Encode(writer io.Writer, img *image.NRGBA64, white float64) error {
 	if err := writeChunk(writer, "IHDR", ihdr[:]); err != nil {
 		return err
 	}
-	// HDR mode: add cICP chunk (PNG 3.0) signaling BT.2020 + PQ.
-	hdrMode := white > 0
-	var scaleFactor float64
-	if hdrMode {
-		cicp := [4]byte{
-			1,  // Color primaries: BT.709/sRGB (pixel data is not gamut-converted)
-			16, // Transfer function: PQ (SMPTE ST 2084)
-			0,  // Matrix coefficients: Identity
-			1,  // Video full range flag
-		}
-		if err := writeChunk(writer, "cICP", cicp[:]); err != nil {
-			return err
-		}
-		// scaleFactor maps srgbToLinear(white) → SDR reference white in PQ's
-		// normalised luminance range [0,1] (where 1 = 10 000 nits).
-		scaleFactor = (sdrWhiteNits / pqMaxNits) / srgbToLinear(white)
+	// Add cICP (PNG 3.0) signaling sRGB primaries with PQ transfer.
+	cicp := [4]byte{
+		1,  // Color primaries: BT.709/sRGB (pixel data is not gamut-converted)
+		16, // Transfer function: PQ (SMPTE ST 2084)
+		0,  // Matrix coefficients: Identity
+		1,  // Video full range flag
 	}
+	if err := writeChunk(writer, "cICP", cicp[:]); err != nil {
+		return err
+	}
+	// scaleFactor maps srgbToLinear(white) -> SDR reference white in PQ's
+	// normalised luminance range [0,1] (where 1 = 10 000 nits).
+	scaleFactor := (sdrWhiteNits / pqMaxNits) / srgbToLinear(white)
 	// IDAT: adaptively filtered image data wrapped in a zlib stream.
 	// image.NRGBA64.Pix is laid out as [R_hi R_lo G_hi G_lo B_hi B_lo A_hi A_lo ...] per pixel,
 	// which matches the PNG byte order.
@@ -240,18 +241,13 @@ func Encode(writer io.Writer, img *image.NRGBA64, white float64) error {
 		candidates[i] = make([]byte, rowBytes)
 	}
 	priorRow := make([]byte, rowBytes) // zeros for first row (no row above)
-	var remappedRow []byte
-	if hdrMode {
-		remappedRow = make([]byte, rowBytes)
-	}
+	remappedRow := make([]byte, rowBytes)
 	filterByte := [1]byte{}
 	for y := range height {
 		srcOff := y * img.Stride
 		raw := img.Pix[srcOff : srcOff+rowBytes]
-		if hdrMode {
-			remapRowToPQ(remappedRow, raw, scaleFactor)
-			raw = remappedRow
-		}
+		remapRowToPQ(remappedRow, raw, scaleFactor)
+		raw = remappedRow
 		// Apply all five filters and pick the one with the smallest absolute sum.
 		bestFilter := byte(0)
 		bestSum := int64(1<<63 - 1)

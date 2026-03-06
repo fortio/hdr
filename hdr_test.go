@@ -21,25 +21,59 @@ func TestEncodeRoundTrip(t *testing.T) {
 		img.SetNRGBA64(x, 1, color.NRGBA64{R: 65535, G: 65535, B: 65535, A: 65535})
 	}
 	var buf bytes.Buffer
-	if err := Encode(&buf, img, 0); err != nil {
+	if err := Encode(&buf, img, 0.5); err != nil {
 		t.Fatalf("Encode failed: %v", err)
 	}
 	decoded, err := png.Decode(&buf)
 	if err != nil {
 		t.Fatalf("png.Decode failed: %v", err)
 	}
-	bounds := decoded.Bounds()
-	if bounds.Dx() != w || bounds.Dy() != h {
-		t.Fatalf("decoded size %dx%d, want %dx%d", bounds.Dx(), bounds.Dy(), w, h)
+	decodedNRGBA64 := decoded.(*image.NRGBA64)
+	decodedBounds := decodedNRGBA64.Bounds()
+	if decodedBounds.Dx() != w || decodedBounds.Dy() != h {
+		t.Fatalf("decoded size %dx%d, want %dx%d", decodedBounds.Dx(), decodedBounds.Dy(), w, h)
 	}
+	expected := image.NewNRGBA64(image.Rect(0, 0, w, h))
 	for y := range h {
+		srcOff := y * img.Stride
+		dstOff := y * expected.Stride
+		remapRowToPQ(expected.Pix[dstOff:dstOff+w*bpp], img.Pix[srcOff:srcOff+w*bpp], (sdrWhiteNits/pqMaxNits)/srgbToLinear(0.5))
 		for x := range w {
-			want := img.NRGBA64At(x, y)
-			got := decoded.(*image.NRGBA64).NRGBA64At(x, y)
+			want := expected.NRGBA64At(x, y)
+			got := decodedNRGBA64.NRGBA64At(x, y)
 			if got != want {
 				t.Errorf("pixel(%d,%d) = %v, want %v", x, y, got, want)
 			}
 		}
+	}
+}
+
+func TestEncodeRoundTripNonZeroBounds(t *testing.T) {
+	bounds := image.Rect(10, 20, 14, 23)
+	img := image.NewNRGBA64(bounds)
+	img.SetNRGBA64(10, 20, color.NRGBA64{R: 65535, A: 65535})
+	img.SetNRGBA64(11, 20, color.NRGBA64{G: 65535, A: 65535})
+	img.SetNRGBA64(12, 20, color.NRGBA64{B: 65535, A: 65535})
+	img.SetNRGBA64(13, 20, color.NRGBA64{R: 32768, G: 16384, B: 8192, A: 65535})
+	for x := bounds.Min.X; x < bounds.Max.X; x++ {
+		img.SetNRGBA64(x, 21, color.NRGBA64{R: 65535, G: 65535, B: 65535, A: 65535})
+	}
+	zeroBounds := image.NewNRGBA64(image.Rect(0, 0, bounds.Dx(), bounds.Dy()))
+	for y := range bounds.Dy() {
+		for x := range bounds.Dx() {
+			zeroBounds.SetNRGBA64(x, y, img.NRGBA64At(bounds.Min.X+x, bounds.Min.Y+y))
+		}
+	}
+	var buf bytes.Buffer
+	if err := Encode(&buf, img, 0.5); err != nil {
+		t.Fatalf("Encode failed: %v", err)
+	}
+	var zeroBuf bytes.Buffer
+	if err := Encode(&zeroBuf, zeroBounds, 0.5); err != nil {
+		t.Fatalf("Encode zero-bounds failed: %v", err)
+	}
+	if !bytes.Equal(buf.Bytes(), zeroBuf.Bytes()) {
+		t.Fatal("encoding differs for equivalent non-zero-bounds image")
 	}
 }
 
@@ -95,16 +129,13 @@ func TestEncodeHDR(t *testing.T) {
 	}
 }
 
-func TestEncodeNoHDR(t *testing.T) {
-	// With white=0, no cICP chunk should be present.
+func TestEncodeRejectsNonHDRWhiteValues(t *testing.T) {
 	img := image.NewNRGBA64(image.Rect(0, 0, 2, 2))
-	img.SetNRGBA64(0, 0, color.NRGBA64{R: 65535, A: 65535})
-	var buf bytes.Buffer
-	if err := Encode(&buf, img, 0); err != nil {
-		t.Fatalf("Encode SDR failed: %v", err)
-	}
-	if _, ok := findChunk(buf.Bytes(), "cICP"); ok {
-		t.Error("cICP chunk should not be present when white=0")
+	for _, white := range []float64{-1, 0, 1.1} {
+		var buf bytes.Buffer
+		if err := Encode(&buf, img, white); err == nil {
+			t.Fatalf("Encode(%f) succeeded, want error", white)
+		}
 	}
 }
 
