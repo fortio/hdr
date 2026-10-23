@@ -259,11 +259,10 @@ func remapRowToPQ(dst, src []byte, table *[numUint16]uint16) {
 func sumAbs(data []byte) int64 {
 	var s int64
 	for _, b := range data {
-		v := int8(b)
-		if v < 0 {
-			s -= int64(v)
+		if b >= 128 {
+			s += int64(256 - int(b))
 		} else {
-			s += int64(v)
+			s += int64(b)
 		}
 	}
 	return s
