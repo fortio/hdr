@@ -5,7 +5,7 @@ go 1.25.0
 require (
 	fortio.org/cli v1.12.3
 	fortio.org/log v1.18.3
-	fortio.org/progressbar v1.3.0
+	fortio.org/progressbar v1.5.0
 	fortio.org/safecast v1.2.0
 )
 
